@@ -19,14 +19,24 @@ pub export fn _PG_init() void {
     pgzx.elog.options.postgresLogFnLeven = pg.NOTICE;
 }
 
+fn logFunctionCall(src: std.builtin.SourceLocation) void {
+    pgzx.elog.Info(src, "{s} called", .{src.fn_name});
+}
+
+const MAX_ROWS = 100;
+
 fn getForeignRelSize(planner_info: [*c]pg.struct_PlannerInfo, rel_opt_info: [*c]pg.struct_RelOptInfo, oid: c_uint) callconv(.C) void {
+    logFunctionCall(@src());
+
     _ = planner_info;
     _ = oid;
 
-    rel_opt_info.*.rows = 5;
+    rel_opt_info.*.rows = MAX_ROWS;
 }
 
 fn getForeignPaths(root: [*c]pg.struct_PlannerInfo, baserel: [*c]pg.struct_RelOptInfo, foreigntableid: c_uint) callconv(.C) void {
+    logFunctionCall(@src());
+
     _ = foreigntableid;
 
     const startup_cost: pg.Cost = 0;
@@ -36,7 +46,20 @@ fn getForeignPaths(root: [*c]pg.struct_PlannerInfo, baserel: [*c]pg.struct_RelOp
     pg.add_path(baserel, @ptrCast(@alignCast(new_path))); // Somehow this casting worked, but I don't actually have a clue why...
 }
 
+fn getForeignJoinPaths(root: [*c]pg.struct_PlannerInfo, joinrel: [*c]pg.struct_RelOptInfo, outerrel: [*c]pg.struct_RelOptInfo, innerrel: [*c]pg.struct_RelOptInfo, jointype: pg.enum_JoinType, extra: [*c]pg.struct_JoinPathExtraData) callconv(.C) void {
+    logFunctionCall(@src());
+
+    _ = root;
+    _ = joinrel;
+    _ = outerrel;
+    _ = innerrel;
+    _ = jointype;
+    _ = extra;
+}
+
 fn getForeignPlan(planner_info: [*c]pg.struct_PlannerInfo, baserel: [*c]pg.struct_RelOptInfo, oid: c_uint, foreign_path: [*c]pg.struct_ForeignPath, tlist: [*c]pg.struct_List, scan_clauses: [*c]pg.struct_List, outer_plan: [*c]pg.struct_Plan) callconv(.C) [*c]pg.struct_ForeignScan {
+    logFunctionCall(@src());
+
     _ = planner_info;
     _ = oid;
     _ = foreign_path;
@@ -46,6 +69,8 @@ fn getForeignPlan(planner_info: [*c]pg.struct_PlannerInfo, baserel: [*c]pg.struc
 }
 
 fn reScanForeignScan(node: [*c]pg.ForeignScanState) callconv(.C) void {
+    logFunctionCall(@src());
+
     const my_scan_state: *MyScanState = @as(*MyScanState, @ptrCast(node.*.fdw_state));
     my_scan_state.current_row = 0;
 }
@@ -53,8 +78,9 @@ fn reScanForeignScan(node: [*c]pg.ForeignScanState) callconv(.C) void {
 const MyScanState = struct { current_row: i8 };
 
 fn beginForeignScan(node: [*c]pg.ForeignScanState, eflags: i32) callconv(.C) void {
+    logFunctionCall(@src());
+
     _ = eflags;
-    pgzx.elog.Info(@src(), "beginForeignScan called", .{});
 
     var memctx = pgzx.mem.createAllocSetContext("zig_context", .{ .parent = pg.CurrentMemoryContext }) catch |err| {
         pgzx.elog.Warning(@src(), "failed to create memctx: {any}", .{err});
@@ -71,12 +97,14 @@ fn beginForeignScan(node: [*c]pg.ForeignScanState, eflags: i32) callconv(.C) voi
 }
 
 fn iterateForeignScan(node: [*c]pg.ForeignScanState) callconv(.C) [*c]pg.TupleTableSlot {
+    // logFunctionCall(@src());
+
     const slot = node.*.ss.ss_ScanTupleSlot;
     _ = pg.ExecClearTuple(slot);
 
     const my_scan_state: *MyScanState = @as(*MyScanState, @ptrCast(node.*.fdw_state));
 
-    if (my_scan_state.current_row < 100) {
+    if (my_scan_state.current_row < MAX_ROWS) {
         const values = [_]pg.Datum{pg.Int32GetDatum(my_scan_state.current_row + 1)};
         const values_ptr = @constCast(values[0..].ptr);
 
@@ -92,6 +120,8 @@ fn iterateForeignScan(node: [*c]pg.ForeignScanState) callconv(.C) [*c]pg.TupleTa
 }
 
 fn endForeignScan(scan_state: [*c]pg.ForeignScanState) callconv(.C) void {
+    logFunctionCall(@src());
+
     _ = scan_state;
 }
 
@@ -99,6 +129,7 @@ fn fdwSequentialIntsHandler() pg.Datum {
     const routines: *pg.FdwRoutine = makeFdwRoutineNode();
     routines.*.GetForeignRelSize = getForeignRelSize;
     routines.*.GetForeignPaths = getForeignPaths;
+    routines.*.GetForeignJoinPaths = getForeignJoinPaths;
     routines.*.GetForeignPlan = getForeignPlan;
     routines.*.BeginForeignScan = beginForeignScan;
     routines.*.IterateForeignScan = iterateForeignScan;
