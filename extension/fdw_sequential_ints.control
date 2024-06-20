@@ -1,0 +1,5 @@
+# fdw_sequential_ints extension
+comment = 'A basic foreign data wrapper (FDW) extension that outputs rows of sequential ints'
+default_version = '0.1'
+module_pathname = '$libdir/fdw_sequential_ints'
+relocatable = true
